@@ -237,7 +237,7 @@ class Group():
 		else:
 
 			# Update it on monday.
-			self.group_id = self.board.work_space.post_request(query='mutation { create_group (board_id: ' + self.board.board_id + ', group_name: "' + self.title + '") { id } }')['create_group']['id']
+			self.group_id = self.board.work_space.post_request(query='mutation { create_group (board_id: ' + self.board.board_id + ', group_name: "' + self.title + '", add_to_top: true) { id } }')['create_group']['id']
 		
 	def set_items(self, json_items):
 		"""
@@ -355,10 +355,25 @@ class Item():
 
 		# Update the item in monday.
 		else:
-
+			
 			# Convert the columns values to json format, as monday wants.
-			columns_values_json = '{' + ', '.join('\\\"' + self.group.board.columns[column_title].column_id + '\\\": \\\"' + value + '\\\"' for column_title, value in columns_values) + '}'
-
+			#columns_values_json = '{' + ', '.join('\\\"' + self.group.board.columns[column_title].column_id + '\\\": \\\"' + value + '\\\"' for column_title, value in columns_values) + '}'
+			
+			columns_values_json = '{'
+			
+			for column_title, value in columns_values:
+				
+				if type(value) is str:
+					columns_values_json += '\\\"' + self.group.board.columns[column_title].column_id + '\\\": \\\"' + value + '\\\"' + ', '
+				elif type(value) is dict:
+					columns_values_json += '\\\"' + self.group.board.columns[column_title].column_id + '\\\": ' + json.dumps(value) + ', '
+			
+			# Remove the last ,.
+			if len(columns_values_json) > 1:
+				columns_values_json = columns_values_json[:-2]
+			
+			columns_values_json += '}'
+			
 			# Add the item to monday and save its id.
 			self.item_id = self.group.board.work_space.post_request(query='mutation {create_item (board_id: ' + self.group.board.board_id + ', group_id: "' + self.group.group_id + '", item_name: "' + self.name + '", column_values: "' + columns_values_json + '") { id } }')['create_item']['id']
 
@@ -397,7 +412,32 @@ class Item():
 			response = json.loads(response_str)
 			
 			print("response:", response)
+			
+	def add_update(self, content):
+		"""
+			The function receives a content and adds it to the update window of the item.
+		"""
 		
+		# The query to add the update.
+		query = 'mutation { create_update (item_id: ' + self.item_id + ', body: "' + content + '") { id } }'
+		
+		# Execute.
+		self.group.board.work_space.post_request(query = query)
+		
+	def add_link(self, column_title, link, description=''):
+		"""
+			The function receives a column, link and a description. It updates the received link in the received column in monday.
+		"""
+		
+		# The query to insert the link.
+		if description:
+			query = 'mutation { change_column_value (board_id: '+ self.group.board.board_id + ', item_id: ' + self.item_id + ', column_id: "' + self.group.board.columns[column_title].column_id + '", value: "{\\\"url\\\":\\\"' + link + '\\\",\\\"text\\\":\\\"' + description + '\\\"}") { id } }'
+		else:
+			query = 'mutation { change_column_value (board_id: '+ self.group.board.board_id + ', item_id: ' + self.item_id + ', column_id: "' + self.group.board.columns[column_title].column_id + '", value: "{\\\"url\\\":\\\"' + link + '\\\",\\\"text\\\":\\\"' + link + '\\\"}") { id } }'
+
+		# Execute.
+		self.group.board.work_space.post_request(query = query)
+
 """
 
 	Usage:
@@ -411,6 +451,7 @@ class Item():
 	# And you can create columns to the board.
 	my_board.add_column(Column(board=my_board, title="Date", description="When the row was added to the board", column_type="date"))
 	my_board.add_column(Column(board=my_board, title="Favourite color", description="the favourite color of the row", column_type="text"))
+	my_board.add_column(Column(board=my_board, title="Link", description="A link to a website", column_type="link"))
 	my_board.add_column(Column(board=my_board, title="Attached Files", description="", column_type="file"))
 	
 	# These columns are saved in my_board.columns. This is a dictionary of the form: {column title: column instance}.
@@ -421,14 +462,17 @@ class Item():
 	
 	# These groups are saved in my_board.groups. This is a dictionary of the form: {group title: group instance}.
 	
-	# Now you can add items to groups.
-	my_board.groups["An amazing group"].add_item(Item(group=my_board.groups["An amazing group"], name="Spectacular item 1"))
+	# Now you can add items to groups. Note that there are columns which requires unique protocol, such as links and files.
+	my_board.groups["An amazing group"].add_item(Item(group=my_board.groups["An amazing group"], name="Spectacular item 1", columns_values=[("Date", "2022-05-04"), ("Favourite color", "Blue"]))
 	my_board.groups["An amazing group"].add_item(Item(group=my_board.groups["An amazing group"], name="Spectacular item 2"))
 	
 	# These items are saved in my_board.groups["An amazing group"].items. This is a dictionary of the form: {item name: item instance}.
 	
-	# You can upload a file to an item's column.
+	# You can upload a file to an item's column (you can upload multiple files to one column).
 	my_board.groups["An amazing group"].items["Spectacular item 1"].upload_files(column_title="Attached Files", files_paths=["path_to_local_file1", "path_to_local_file2"])
+	
+	# You can add a link to an item's column (multiple links for one column currently unsupported with monday).
+	my_board.groups["An amazing group"].items["Spectacular item 1"].add_link(column_title="Link", link="www.google.com", description="search with google")
 
 """
 
@@ -443,6 +487,7 @@ courses_board = Board(ws=work_space, name="Courses")
 # Create columns for the courses board.
 courses_board.add_column(Column(board=courses_board, title="From", description="Who sent the mail", column_type="text"))
 courses_board.add_column(Column(board=courses_board, title="Date", description="When the email was received", column_type="date"))
+courses_board.add_column(Column(board=courses_board, title="Links", description="Links in the mail message", column_type="link"))
 courses_board.add_column(Column(board=courses_board, title="Attached Files", description="All the files attached to this mail", column_type="file"))
 
 # Create a group for each course in courses.
@@ -452,16 +497,18 @@ for course in ["Calculus", "Linear Algebra", "Combinatorics"]:
 	courses_board.add_group(Group(board=courses_board, title=course))
 
 # Add mails to each group.
-courses_board.groups["Calculus"].add_item(Item(group=courses_board.groups["Calculus"], name="mail 1", columns_values=[("From", "Moshe"), ("Date", "2022-05-03")]))
 courses_board.groups["Calculus"].add_item(Item(group=courses_board.groups["Calculus"], name="mail 2", columns_values=[("From", "Shalom"), ("Date", "2022-05-04")]))
+courses_board.groups["Calculus"].add_item(Item(group=courses_board.groups["Calculus"], name="mail 1", columns_values=[("From", "Moshe"), ("Date", "2022-05-03")]))
+courses_board.groups["Calculus"].items["mail 1"].add_link(column_title="Links", link="www.google.com", description="")
 courses_board.groups["Calculus"].add_item(Item(group=courses_board.groups["Calculus"], name="mail 3", columns_values=[("From", "Yisaschar"), ("Date", "2022-05-07")]))
 courses_board.groups["Combinatorics"].add_item(Item(group=courses_board.groups["Combinatorics"], name="mail 1"))
 courses_board.groups["Linear Algebra"].add_item(Item(group=courses_board.groups["Linear Algebra"], name="mail 2"))
 courses_board.groups["Linear Algebra"].add_item(Item(group=courses_board.groups["Linear Algebra"], name="mail 2"))
 
+
 # Add the attached files to the mails.
 courses_board.groups["Calculus"].items["mail 1"].upload_files(column_title="Attached Files", files_paths=['C:\python\MondayHackathon\hello world.txt', 'C:\python\MondayHackathon\Just another file.txt'])
-
+courses_board.groups["Calculus"].items["mail 1"].add_update("This is the content of the mail.")
 
 """
 # --- Links Board ---
