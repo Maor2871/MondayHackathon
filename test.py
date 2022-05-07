@@ -343,7 +343,7 @@ class Analayser(MyThread):
 		self.item_id = item_id
 		self.function = function
 		self.inputs = inputs
-		
+
 	def manager(self):
 		"""
 			The function executes the function of the analyser.
@@ -586,9 +586,12 @@ class Item():
 		# Execute.
 		self.group.board.work_space.post_request(query = query)
 
+
 """
 
 	Usage:
+	
+	# ----- Boards columns groups and items creation -----
 	
 	# First, you'd probably like to create a reference to your workspace.
 	# Important note: Monday does not recognize an empty work space. An existing workspace is one with at least one board. Therefore, do not except to track your workspace if it's empty.
@@ -622,6 +625,15 @@ class Item():
 	
 	# You can add a link to an item's column (multiple links for one column currently unsupported with monday).
 	my_board.groups["An amazing group"].items["Spectacular item 1"].add_link(column_title="Link", link="www.google.com", description="search with google")
+	
+	
+	# ----- Input manipulation -----
+	
+	# For Getting input you'd probably like to use InputBoard. This board is a board on monday which is also a thread.
+	# Each second the thread checks if a new item was added to one of the groups in the board. If it did, it calls to a function which knows how to handle with the input, as a thread.
+	input_board = InputBoard(ws=work_space, name="Input", execution_dict={'Group1': group_1_handle_new_item, 'Group2': group_2_handle_new_item})
+	
+	# Now, when the user adds an item to group1 in monday, input_board automatically calls to group_1_handle_new_item(item_name=new_item1) as a thread.
 
 """
 
