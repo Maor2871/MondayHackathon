@@ -1,5 +1,8 @@
 import requests
 import json
+import threading
+from abc import abstractmethod
+from time import sleep
 
 
 """
@@ -7,16 +10,54 @@ import json
 """
 
 
+class MyThread(threading.Thread):
+    """
+        This class creates threads.
+    """
+
+    def __init__(self, thread_id=-1, thread_name="thread", **kwargs):
+        """
+            Initialize the thread.
+        """
+
+        # Call the super constructor with self.
+        super(MyThread, self).__init__(**kwargs)
+
+        # The id of the thread.
+        self.thread_id = thread_id
+
+        # The name of the thread.
+        self.thread_name = thread_name
+
+    def run(self):
+        """
+            Overrides the start() function of the threading.thread. To Execute the thread, call start() not run().
+        """
+
+        self.manager()
+
+    @abstractmethod
+    def manager(self):
+        """
+            The function is intended for overriding by extended classes.
+        """
+
+
 class WorkSpace():
 	"""
 		A workspace.
+		
+		Do not initialize a workspace which has no board on monday. monday does not recognize a workspace as workspace if it has not boards at all.
 	"""
 	
-	def __init__(self, token):
+	def __init__(self, name, token):
 		"""
 			Define the workspace.
 		"""
-	
+		
+		# The name of the workspace. Helps to track the required workspace to work on from monday.
+		self.name = name
+		
 		# The token of the Monday user.
 		self.token = token
 		
@@ -25,7 +66,7 @@ class WorkSpace():
 		
 		# Headers for the post requests.
 		self.headers = {"Authorization" : self.token}
-		
+	
 		# A dictionary with all the boards in the workspace {board_name: board instance}.
 		self.boards = {}
 		
@@ -68,7 +109,12 @@ class WorkSpace():
 			The function returns the id of the workspace.
 		"""
 		
-		return self.post_request(query='{ boards (ids: ' + list(self.boards.values())[0].board_id + ') { id name workspace { id name } }}')['boards'][0]['workspace']['id']
+		# The are no boards currently in the workspace. Things won't work out here.
+		if not self.boards:
+			return
+		
+		# Just get the workspace id via one of the workspace boards.
+		return self.post_request(query='{ boards (ids:' + list(self.boards.values())[0].board_id + '){id name workspace {id name} }}')['boards'][0]['workspace']['id']
 	
 	def update_boards_in_ws(self):
 		"""
@@ -77,21 +123,30 @@ class WorkSpace():
 			It returns a list with all the boards.
 		"""
 		
-		# Get the data of the boards with graph-ql format.
-		boards_data = self.post_request(query='{ boards (limit:1) {id name groups{id title} columns{id title type description} items{id name group{ id title } column_values{id text}} }}')
-		
-		# Get the list of boards, as a dictionary converted from json.
-		boards_json_list = boards_data['boards']
-
-		# This list will eventual contain all the boards in the workspace.
+		# Reset the current status of boards.
 		self.boards = {}
 		
-		# Iterate over the boards.
-		for board in boards_json_list:
+		# Get the ids and names of all the boards in the current monday account (identified by the received token).
+		boards_names = self.post_request(query='{ boards {id name workspace {id name} }}')
+		
+		# Iterate over the boards. It is required to get board by board and not all at once, because there are heavy boards sometimes, and monday doesn't like to make too large responses.
+		for board in boards_names['boards']:
+
+			# First, make sure that the current board is from the current workspace.
+			if not board['workspace'] or not board['workspace']['name'] == self.name:
+				
+				# Try the next board.
+				continue
+
+			# Get the data of the board with graph-ql format.
+			boards_data = self.post_request(query='{ boards (ids:' + board['id'] + ') {id name groups{id title} columns{id title type description} items{id name group{ id title } column_values{id text}} }}')
 			
-			# Create the current board and append it the the boards list.
-			self.boards[board["name"]] = Board(ws=self, name=board['name'], board_id=board['id'], json_groups=board['groups'], json_columns=board['columns'], json_items=board['items'])
+			# Extract the board data only from the response.
+			full_board_data = boards_data['boards'][0]
 	
+			# Create the current board and append it the the boards list.
+			self.boards[board["name"]] = Board(ws=self, name=board['name'], board_id=board['id'], json_groups=full_board_data['groups'], json_columns=full_board_data['columns'], json_items=full_board_data['items'])
+
 	def add_board(self, board):
 		"""
 			The function receives a board and adds it to the workspace.
@@ -208,6 +263,99 @@ class Board():
 		self.groups[group.title] = group
 		
 
+class InputBoard(MyThread, Board):
+	"""
+		A board that gets input from the user in monday.
+	"""
+	
+	def __init__(self, ws, name, execution_dict):
+		"""
+			Initialize the input board.
+		"""
+		
+		# Initialize input board as a thread.
+		MyThread.__init__(self)
+		
+		# Initialize input board as a board.
+		Board.__init__(self, ws=ws, name=name)
+		
+		# Create a status bar column.
+		self.add_column(Column(board=self, title="Execution Status", description="", column_type="status"))
+		
+		# Save the id of the status column.
+		self.status_column_id = self.columns["Execution Status"].column_id
+		
+		# The execution dictionary. 
+		# Form: {'group title': reference to a function which handles the submission of a new item in that group. Note that this function receives an item's name}
+		self.execution_dict = execution_dict
+		
+	def manager(self):
+		"""
+			The thread body. Do not call manager() on the input board. Call to start() instead.
+		"""
+		
+		# Every one second, checkout the items on the board.
+		while True:
+			
+			# Get all the items on the board.
+			items_json = self.work_space.post_request(query='{ boards (ids: ' + self.board_id + ') {id items{id name group {id title} column_values {title value}}} }')['boards'][0]['items']
+
+			# Iterate overt the input items.
+			for current_item in items_json:
+				
+				# That's a new item.
+				if not current_item['column_values'][0]['value']:
+					
+					# Update the status of the item to working on it.
+					self.work_space.post_request(query='mutation { change_column_value (board_id: ' + self.board_id + ', item_id: ' + current_item['id'] + ', column_id: "' + self.status_column_id + '", value: "{\\\"index\\\" : 0}") { id } }')
+					
+					# Call the function that handles the item submission as a thread.
+					analyser = Analayser(input_board=self, item_id = current_item['id'], function=self.execution_dict[current_item['group']['title']], inputs={"item_name": current_item['name']})
+					analyser.start()
+					
+			# Take a rest for a second before the next check.
+			sleep(1)
+	
+	def update_handled_successfully(self, item_id):
+		"""
+			The function receives an id of an item and updates its status to done in the input board.
+		"""
+		
+		self.work_space.post_request()
+		
+
+class Analayser(MyThread):
+	"""
+		An analyser warps a function as a thread.
+	"""
+	
+	def __init__(self, input_board, item_id, function, inputs):
+		"""
+			Receives the function to execute and its inputs as dictionary of the form {parameter: value}.
+			Holds a reference to the input board, and has the id of the item that caused to the spawn of the analyzer.
+		"""
+		
+		# Initialize the thread.
+		MyThread.__init__(self)
+		
+		# Save the data of the analyser.
+		self.input_board = input_board
+		self.item_id = item_id
+		self.function = function
+		self.inputs = inputs
+		
+	def manager(self):
+		"""
+			The function executes the function of the analyser.
+		"""
+		
+		# Execute the function.
+		self.function(**self.inputs)
+		
+		# Update the status of the analyser to Done.
+		self.input_board.work_space.post_request(query='mutation { change_column_value (board_id: ' + self.input_board.board_id + ', item_id: ' + self.item_id + ', column_id: "' + self.input_board.status_column_id + '", value: "{\\\"index\\\" : 1}") { id } }')
+
+
 class Group():
 	"""
 		Represents a group of a board.
@@ -237,7 +385,7 @@ class Group():
 		else:
 
 			# Update it on monday.
-			self.group_id = self.board.work_space.post_request(query='mutation { create_group (board_id: ' + self.board.board_id + ', group_name: "' + self.title + '", add_to_top: true) { id } }')['create_group']['id']
+			self.group_id = self.board.work_space.post_request(query='mutation { create_group (board_id: ' + self.board.board_id + ', group_name: "' + self.title + '") { id } }')['create_group']['id']
 		
 	def set_items(self, json_items):
 		"""
@@ -319,7 +467,7 @@ class Column():
 		else:
 
 			self.column_id = self.board.work_space.post_request(query='mutation{ create_column(board_id: ' + self.board.board_id + ', title:"' + self.title + '", description: "' + self.description + '", column_type:' + self.column_type + ') { id title description } }')['create_column']['id']
-		
+
 
 class Item():
 	"""
@@ -443,7 +591,8 @@ class Item():
 	Usage:
 	
 	# First, you'd probably like to create a reference to your workspace.
-	work_space = WorkSpace(token="your token")
+	# Important note: Monday does not recognize an empty work space. An existing workspace is one with at least one board. Therefore, do not except to track your workspace if it's empty.
+	work_space = WorkSpace(name="the name of the required board", token="your token")
 	
 	# Now you can create boards.
 	my_board = Board(ws=work_space, name="My terrific board")
@@ -476,10 +625,45 @@ class Item():
 
 """
 
+
+def new_course(item_name):
+	"""
+		The function is being called when a new course was added as an input.
+	"""
+	
+	courses_board.add_group(Group(board=courses_board, title=item_name))
+	courses_board.groups[item_name].add_item(Item(group=courses_board.groups[item_name], name="mail 1", columns_values=[("From", "Moshe"), ("Date", "2022-05-03")]))
+	courses_board.groups[item_name].add_item(Item(group=courses_board.groups[item_name], name="mail 2", columns_values=[("From", "Shalom"), ("Date", "2022-05-04")]))
+	courses_board.groups[item_name].add_item(Item(group=courses_board.groups[item_name], name="mail 3", columns_values=[("From", "Yisaschar"), ("Date", "2022-05-07")]))
+
+	# Add the attached files, zoom links and contents of the mails.
+	for i in range(3):
+	
+		courses_board.groups[item_name].items["mail " + str(i + 1)].add_link(column_title="Zoom link", link="https://zoom.com/my_meeting" + str(i + 1), description="")
+		courses_board.groups[item_name].items["mail " + str(i + 1)].upload_files(column_title="Attached Files", files_paths=['C:\python\MondayHackathon\hello world.txt', 'C:\python\MondayHackathon\Just another file.txt'])
+		courses_board.groups[item_name].items["mail " + str(i + 1)].add_update("This is the subject of the" + str(i + 1) + " mail.")
+		courses_board.groups[item_name].items["mail " + str(i + 1)].add_update("This is the content of the" + str(i + 1) + " mail.\n"*10)
+
+
 # Create the workspace.
-work_space = WorkSpace(token="eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjE1ODI2MDM3MiwidWlkIjoyOTk1NzM5MSwiaWFkIjoiMjAyMi0wNC0yOVQyMTo0NzozNi4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6MTE4NzU5MjIsInJnbiI6InVzZTEifQ.R7UplEfmGyfk1uPEr1A-UFNlcdCZ8VjfrGKl63WQYYo")
+work_space = WorkSpace(name="test", token="eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjE1ODI2MDM3MiwidWlkIjoyOTk1NzM5MSwiaWFkIjoiMjAyMi0wNC0yOVQyMTo0NzozNi4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6MTE4NzU5MjIsInJnbiI6InVzZTEifQ.R7UplEfmGyfk1uPEr1A-UFNlcdCZ8VjfrGKl63WQYYo")
+
+
+# --- Input Board
+
+
+# Create a new input board.
+input_board = InputBoard(ws=work_space, name="Input", execution_dict={'Courses': new_course})
+
+# Create input groups.
+for input_type in ["Courses", "Lecturers", "Special Contacts"]:
+
+	# Create a group for the current input type.
+	input_board.add_group(Group(board=input_board, title=input_type))
+
 
 # --- Courses Board ---
+
 
 # Create a new board for the courses.
 courses_board = Board(ws=work_space, name="Courses")
@@ -487,115 +671,8 @@ courses_board = Board(ws=work_space, name="Courses")
 # Create columns for the courses board.
 courses_board.add_column(Column(board=courses_board, title="From", description="Who sent the mail", column_type="text"))
 courses_board.add_column(Column(board=courses_board, title="Date", description="When the email was received", column_type="date"))
-courses_board.add_column(Column(board=courses_board, title="Links", description="Links in the mail message", column_type="link"))
+courses_board.add_column(Column(board=courses_board, title="Zoom link", description="Links in the mail message", column_type="link"))
 courses_board.add_column(Column(board=courses_board, title="Attached Files", description="All the files attached to this mail", column_type="file"))
 
-# Create a group for each course in courses.
-for course in ["Calculus", "Linear Algebra", "Combinatorics"]:
 
-	# Create a group for the current course.
-	courses_board.add_group(Group(board=courses_board, title=course))
-
-# Add mails to each group.
-courses_board.groups["Calculus"].add_item(Item(group=courses_board.groups["Calculus"], name="mail 2", columns_values=[("From", "Shalom"), ("Date", "2022-05-04")]))
-courses_board.groups["Calculus"].add_item(Item(group=courses_board.groups["Calculus"], name="mail 1", columns_values=[("From", "Moshe"), ("Date", "2022-05-03")]))
-courses_board.groups["Calculus"].items["mail 1"].add_link(column_title="Links", link="www.google.com", description="")
-courses_board.groups["Calculus"].add_item(Item(group=courses_board.groups["Calculus"], name="mail 3", columns_values=[("From", "Yisaschar"), ("Date", "2022-05-07")]))
-courses_board.groups["Combinatorics"].add_item(Item(group=courses_board.groups["Combinatorics"], name="mail 1"))
-courses_board.groups["Linear Algebra"].add_item(Item(group=courses_board.groups["Linear Algebra"], name="mail 2"))
-courses_board.groups["Linear Algebra"].add_item(Item(group=courses_board.groups["Linear Algebra"], name="mail 2"))
-
-
-# Add the attached files to the mails.
-courses_board.groups["Calculus"].items["mail 1"].upload_files(column_title="Attached Files", files_paths=['C:\python\MondayHackathon\hello world.txt', 'C:\python\MondayHackathon\Just another file.txt'])
-courses_board.groups["Calculus"].items["mail 1"].add_update("This is the content of the mail.")
-
-"""
-# --- Links Board ---
-
-# Create a new board for the links.
-links_board = Board(ws=work_space, name="Links")
-
-# Create columns for the links board.
-links_board.add_column(Column(board=links_board, title="Subject", description="", column_type="text"))
-links_board.add_column(Column(board=links_board, title="From", description="Who sent the mail", column_type="text"))
-links_board.add_column(Column(board=links_board, title="Date", description="When the email was received", column_type="date"))
-
-# Create a group for each period.
-for period in ["Last Week", "Last Month", "Last 3 Months", "Last Year", "All Time"]:
-
-	# Create a group for the current period.
-	links_board.add_group(Group(board=links_board, title=period))
-
-# Add mails to each group.
-links_board.groups["All Time"].add_item(Item(group=links_board.groups["All Time"], name="link 1"))
-links_board.groups["All Time"].add_item(Item(group=links_board.groups["All Time"], name="link 2"))
-links_board.groups["Last Year"].add_item(Item(group=links_board.groups["Last Year"], name="link 1"))
-links_board.groups["Last Year"].add_item(Item(group=links_board.groups["Last Year"], name="link 2"))
-links_board.groups["Last 3 Months"].add_item(Item(group=links_board.groups["Last 3 Months"], name="link 1"))
-links_board.groups["Last 3 Months"].add_item(Item(group=links_board.groups["Last 3 Months"], name="link 2"))
-links_board.groups["Last Month"].add_item(Item(group=links_board.groups["Last Month"], name="link 1"))
-links_board.groups["Last Month"].add_item(Item(group=links_board.groups["Last Month"], name="link 2"))
-links_board.groups["Last Week"].add_item(Item(group=links_board.groups["Last Week"], name="link 1"))
-links_board.groups["Last Week"].add_item(Item(group=links_board.groups["Last Week"], name="link 2"))
-
-
-# --- Attached Files Board ---
-
-# Create a new board for the courses.
-attached_files_board = Board(ws=work_space, name="Attached Files")
-
-# Create columns for the attached files board.
-attached_files_board.add_column(Column(board=attached_files_board, title="Subject", description="", column_type="text"))
-attached_files_board.add_column(Column(board=attached_files_board, title="From", description="Who sent the mail", column_type="text"))
-attached_files_board.add_column(Column(board=attached_files_board, title="Date", description="When the email was received", column_type="date"))
-
-# Create a group for each period.
-for period in ["Last Week", "Last Month", "Last 3 Months", "Last Year", "All Time"]:
-
-	# Create a group for the current period.
-	attached_files_board.add_group(Group(board=attached_files_board, title=period))
-
-# Add mails to each group.
-attached_files_board.groups["All Time"].add_item(Item(group=attached_files_board.groups["All Time"], name="attached file 1"))
-attached_files_board.groups["All Time"].add_item(Item(group=attached_files_board.groups["All Time"], name="attached file 2"))
-attached_files_board.groups["Last Year"].add_item(Item(group=attached_files_board.groups["Last Year"], name="attached file 1"))
-attached_files_board.groups["Last Year"].add_item(Item(group=attached_files_board.groups["Last Year"], name="attached file 2"))
-attached_files_board.groups["Last 3 Months"].add_item(Item(group=attached_files_board.groups["Last 3 Months"], name="attached file 1"))
-attached_files_board.groups["Last 3 Months"].add_item(Item(group=attached_files_board.groups["Last 3 Months"], name="attached file 2"))
-attached_files_board.groups["Last Month"].add_item(Item(group=attached_files_board.groups["Last Month"], name="attached file 1"))
-attached_files_board.groups["Last Month"].add_item(Item(group=attached_files_board.groups["Last Month"], name="attached file 2"))
-attached_files_board.groups["Last Month"].add_item(Item(group=attached_files_board.groups["Last Month"], name="attached file 3"))
-attached_files_board.groups["Last Week"].add_item(Item(group=attached_files_board.groups["Last Week"], name="attached file 1"))
-attached_files_board.groups["Last Week"].add_item(Item(group=attached_files_board.groups["Last Week"], name="attached file 2"))
-
-
-# --- secretariat Board ---
-
-# Create a new board for the secretariat.
-secretariat_board = Board(ws=work_space, name="secretariat")
-
-# Create columns for the secretariat board.
-secretariat_board.add_column(Column(board=secretariat_board, title="Date", description="When the email was received", column_type="date"))
-secretariat_board.add_column(Column(board=secretariat_board, title="Attached Files", description="Files attached to the mail", column_type="text"))
-
-
-# Create a group for each period.
-for period in ["Last Week", "Last Month", "Last 3 Months", "Last Year", "All Time"]:
-
-	# Create a group for the current period.
-	secretariat_board.add_group(Group(board=secretariat_board, title=period))
-
-# Add mails to each group.
-secretariat_board.groups["All Time"].add_item(Item(group=secretariat_board.groups["All Time"], name="mail  1"))
-secretariat_board.groups["All Time"].add_item(Item(group=secretariat_board.groups["All Time"], name="mail  2"))
-secretariat_board.groups["Last Year"].add_item(Item(group=secretariat_board.groups["Last Year"], name="mail  1"))
-secretariat_board.groups["Last Year"].add_item(Item(group=secretariat_board.groups["Last Year"], name="mail  2"))
-secretariat_board.groups["Last 3 Months"].add_item(Item(group=secretariat_board.groups["Last 3 Months"], name="mail  1"))
-secretariat_board.groups["Last 3 Months"].add_item(Item(group=secretariat_board.groups["Last 3 Months"], name="mail  2"))
-secretariat_board.groups["Last Month"].add_item(Item(group=secretariat_board.groups["Last Month"], name="mail  1"))
-secretariat_board.groups["Last Month"].add_item(Item(group=secretariat_board.groups["Last Month"], name="mail  2"))
-secretariat_board.groups["Last Month"].add_item(Item(group=secretariat_board.groups["Last Month"], name="mail  3"))
-secretariat_board.groups["Last Week"].add_item(Item(group=secretariat_board.groups["Last Week"], name="mail  1"))
-secretariat_board.groups["Last Week"].add_item(Item(group=secretariat_board.groups["Last Week"], name="mail  2"))
-"""
+input_board.start()
