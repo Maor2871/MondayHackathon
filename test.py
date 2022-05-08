@@ -50,7 +50,7 @@ class WorkSpace():
 		Do not initialize a workspace which has no board on monday. monday does not recognize a workspace as workspace if it has not boards at all.
 	"""
 	
-	def __init__(self, name, token):
+	def __init__(self, name, token, print_api_protocol=False):
 		"""
 			Define the workspace.
 		"""
@@ -66,7 +66,10 @@ class WorkSpace():
 		
 		# Headers for the post requests.
 		self.headers = {"Authorization" : self.token}
-	
+		
+		# If True, prints the data transmission with the api.
+		self.print_api_protocol = print_api_protocol
+		
 		# A dictionary with all the boards in the workspace {board_name: board instance}.
 		self.boards = {}
 		
@@ -84,25 +87,99 @@ class WorkSpace():
 		# Follow the format.
 		data = {'query': query}
 		
-		print("sending:", query)
+		if self.print_api_protocol:
+			print("sending:", query)
 		
 		# Send the post request and save the response as the received json string.
 		response_str = requests.post(url=self.apiUrl, json=data, headers=self.headers).text
 
 		# Convert the json string to the original object.
 		response = json.loads(response_str)
-
+		
+		# Check if any errors occurred. Handle them correctly.
+		if not self.handle_response_errors(response=response):
+		
+			# An error occurred. Try to post the request again.
+			return self.post_request(query=query)
+		if 'create_group' in query:
+			print("create_group:")
+			print("send:", query)
+			print("received:", response)
 		# Return the answer.
 		try:
-			print("received:", response)
-			print()
+			if self.print_api_protocol:
+				print("received:", response)
+				print()
 			return response['data']
 		
 		except:
 			
-			# Probably an error.
+			# Probably an untracked error.
+			#if self.print_api_protocol:
+			print("untracked error in post request:")
+			print("query:", query)
 			print("error: ", response)
 			print()
+	
+	def handle_response_errors(self, response):
+		"""
+			The function receives a response from the api.
+			It checks if any errors were received.
+			It handles the errors, e.g. sleeps if received complexity budget exhausted error.
+			Returns True if it is not required to re-upload the request, and return False otherwise.
+		"""
+		
+		# Something went wrong. Check if can identify what's up.
+		if 'errors' in response:
+			
+			# Get the errors list.
+			errors = response['errors']
+			
+			# Iterate over the errors.
+			for error in errors:
+				
+				# Usually the error is described in message.
+				if 'message' in error:
+					
+					# The error message.
+					error_messge = error['message']
+					
+					# To much data was sent lately. The api needs a rest.
+					if 'Complexity budget exhausted' in error_messge:
+						
+						# If the number of seconds won't be identified, wait 5 seconds as default.
+						seconds_to_rest = 5
+						
+						# The required number of seconds to rest is specified.
+						if 'reset in ' in error_messge:
+							
+							# Try to extract the specified amount of seconds to rest.
+							seconds_to_rest = error_messge.split('reset in ')[1][0]
+							
+							# Check if it is really a number.
+							if seconds_to_rest.isdigit():
+								
+								# Get the number of seconds to rest and add 1 just in case (sometimes returns 0 seconds to rest, we want to give it chills).
+								seconds_to_rest = int(seconds_to_rest) + 1
+					
+						# Rest.
+						sleep(seconds_to_rest)
+						
+						# Need to make the post request again.
+						return False
+					
+					# Undefined error.
+					else:
+						
+						# Save the error in the errors file for later observation.
+						with open("errors.txt", "a") as file1:						
+							file1.write(error_messge)
+			
+			# Nevertheless, try again to post the request.
+			return False
+		
+		# Seems like everything is fine.
+		return True
 	
 	def get_ws_id(self):
 		"""
@@ -123,7 +200,7 @@ class WorkSpace():
 			It returns a list with all the boards.
 		"""
 		
-		# Reset the current status of boards.
+		# Reset the current status of the boards.
 		self.boards = {}
 		
 		# Get the ids and names of all the boards in the current monday account (identified by the received token).
@@ -540,25 +617,41 @@ class Item():
 		"""
 			The function receives a list with files paths and a column and uploads the file to that column.
 		"""
+		
+		# Upload all the files.
 		for file_path in files_paths:
+			self.upload_file(column_title=column_title, file_path=file_path)
+				
+	def upload_file(self, column_title, file_path):
+		"""
+			The function uploads a single file to the received column.
+		"""
 		
-			# The query that makes the request to upload the file to the specific received column.
-			query = 'mutation ($file: File!) { add_file_to_column (file: $file, item_id: ' + self.item_id + ', column_id: "' + self.group.board.columns[column_title].column_id + '") {id }}'
+		# The query that makes the request to upload the file to the specific received column.
+		query = 'mutation ($file: File!) { add_file_to_column (file: $file, item_id: ' + self.item_id + ', column_id: "' + self.group.board.columns[column_title].column_id + '") {id }}'
 
-			# A list with all the files in the required format.
-			files=[('variables[file]', (file_path ,open(file_path, 'rb'), 'multipart/form-data'))]
+		# A list with all the files in the required format.
+		files=[('variables[file]', (file_path ,open(file_path, 'rb'), 'multipart/form-data'))]
+	
+		# Follow the format.
+		data = {'query': query}
 		
-			# Follow the format.
-			data = {'query': query}
-			
+		if self.group.board.work_space.print_api_protocol:
 			print("sending:", query)
 
-			# Send the post request and save the response as the received json string.
-			response_str = requests.post(url="https://api.monday.com/v2/file", headers={'Authorization': self.group.board.work_space.token}, data=data, files=files).text
+		# Send the post request and save the response as the received json string.
+		response_str = requests.post(url="https://api.monday.com/v2/file", headers={'Authorization': self.group.board.work_space.token}, data=data, files=files).text
 
-			# Convert the json string to the original object.
-			response = json.loads(response_str)
-			
+		# Convert the json string to the original object.
+		response = json.loads(response_str)
+		
+		# Check if any errors occurred.
+		if not self.group.board.work_space.handle_response_errors(response=response):
+		
+			# An error occurred, try to upload the file again.
+			return self.upload_file(column_title=column_title, file_path=file_path)
+		
+		if self.group.board.work_space.print_api_protocol:
 			print("response:", response)
 			
 	def add_update(self, content):
@@ -644,19 +737,36 @@ def new_course(item_name):
 	"""
 	
 	courses_board.add_group(Group(board=courses_board, title=item_name))
-	courses_board.groups[item_name].add_item(Item(group=courses_board.groups[item_name], name="mail 1", columns_values=[("From", "Moshe"), ("Date", "2022-05-03")]))
-	courses_board.groups[item_name].add_item(Item(group=courses_board.groups[item_name], name="mail 2", columns_values=[("From", "Shalom"), ("Date", "2022-05-04")]))
-	courses_board.groups[item_name].add_item(Item(group=courses_board.groups[item_name], name="mail 3", columns_values=[("From", "Yisaschar"), ("Date", "2022-05-07")]))
+	courses_board.groups[item_name].add_item(Item(group=courses_board.groups[item_name], name="This is the subject of the 1st mail", columns_values=[("From", "Moshe"), ("Date", "2022-05-03")]))
+	courses_board.groups[item_name].add_item(Item(group=courses_board.groups[item_name], name="This is the subject of the 2st mail", columns_values=[("From", "Shalom"), ("Date", "2022-05-04")]))
+	courses_board.groups[item_name].add_item(Item(group=courses_board.groups[item_name], name="This is the subject of the 3st mail", columns_values=[("From", "Yisaschar"), ("Date", "2022-05-07")]))
 
 	# Add the attached files, zoom links and contents of the mails.
 	for i in range(3):
 	
-		courses_board.groups[item_name].items["mail " + str(i + 1)].add_link(column_title="Zoom link", link="https://zoom.com/my_meeting" + str(i + 1), description="")
-		courses_board.groups[item_name].items["mail " + str(i + 1)].upload_files(column_title="Attached Files", files_paths=['C:\python\MondayHackathon\hello world.txt', 'C:\python\MondayHackathon\Just another file.txt'])
-		courses_board.groups[item_name].items["mail " + str(i + 1)].add_update("This is the subject of the" + str(i + 1) + " mail.")
-		courses_board.groups[item_name].items["mail " + str(i + 1)].add_update("This is the content of the" + str(i + 1) + " mail.\n"*10)
+		courses_board.groups[item_name].items["This is the subject of the " + str(i + 1) + "st mail"].add_link(column_title="Zoom link", link="https://zoom.com/my_meeting" + str(i + 1), description="")
+		courses_board.groups[item_name].items["This is the subject of the " + str(i + 1) + "st mail"].upload_files(column_title="Attached Files", files_paths=['C:\python\MondayHackathon\hello world.txt', 'C:\python\MondayHackathon\Just another file.txt'])
+		courses_board.groups[item_name].items["This is the subject of the " + str(i + 1) + "st mail"].add_update("This is the content of the" + str(i + 1) + " mail.\n"*10)
 
 
+def new_lecturer(item_name):
+	"""
+		The function is being called when a new lecturer name was added as an input.
+	"""
+
+	lecturers_board.add_group(Group(board=lecturers_board, title=item_name))
+
+	for i in range(30):
+		lecturers_board.groups[item_name].add_item(Item(group=lecturers_board.groups[item_name], name="This is the subject of the " + str(i + 1) + "st mail", columns_values=[("Date", "2022-05-1" + str(i + 1)[-1] + "")]))
+
+	# Add the attached files, zoom links and contents of the mails.
+	for i in range(30):
+		
+		lecturers_board.groups[item_name].items["This is the subject of the " + str(i + 1) + "st mail"].add_link(column_title="Zoom link", link="https://zoom.com/my_meeting" + str(i + 1), description="")
+		lecturers_board.groups[item_name].items["This is the subject of the " + str(i + 1) + "st mail"].upload_files(column_title="Attached Files", files_paths=['C:\python\MondayHackathon\hello world.txt', 'C:\python\MondayHackathon\Just another file.txt'])
+		lecturers_board.groups[item_name].items["This is the subject of the " + str(i + 1) + "st mail"].add_update("This is the content of the" + str(i + 1) + " mail.\n"*10)
+
+		
 # Create the workspace.
 work_space = WorkSpace(name="test", token="eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjE1ODI2MDM3MiwidWlkIjoyOTk1NzM5MSwiaWFkIjoiMjAyMi0wNC0yOVQyMTo0NzozNi4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6MTE4NzU5MjIsInJnbiI6InVzZTEifQ.R7UplEfmGyfk1uPEr1A-UFNlcdCZ8VjfrGKl63WQYYo")
 
@@ -665,7 +775,7 @@ work_space = WorkSpace(name="test", token="eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjE1ODI2
 
 
 # Create a new input board.
-input_board = InputBoard(ws=work_space, name="Input", execution_dict={'Courses': new_course})
+input_board = InputBoard(ws=work_space, name="Input", execution_dict={'Courses': new_course, 'Lecturers': new_lecturer})
 
 # Create input groups.
 for input_type in ["Courses", "Lecturers", "Special Contacts"]:
@@ -687,4 +797,17 @@ courses_board.add_column(Column(board=courses_board, title="Zoom link", descript
 courses_board.add_column(Column(board=courses_board, title="Attached Files", description="All the files attached to this mail", column_type="file"))
 
 
+# --- Lecturers Board ---
+
+
+# Create a new board for the courses.
+lecturers_board = Board(ws=work_space, name="Lecturers")
+
+# Create columns for the courses board.
+lecturers_board.add_column(Column(board=lecturers_board, title="Date", description="When the email was received", column_type="date"))
+lecturers_board.add_column(Column(board=lecturers_board, title="Zoom link", description="Links in the mail message", column_type="link"))
+lecturers_board.add_column(Column(board=lecturers_board, title="Attached Files", description="All the files attached to this mail", column_type="file"))
+
+# Start listening to the input board.
 input_board.start()
+
