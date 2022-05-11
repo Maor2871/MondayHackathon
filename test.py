@@ -4,7 +4,7 @@ import threading
 from abc import abstractmethod
 from time import sleep
 
-
+# Notes
 """
 	Documentation for the graph=ql: https://api.developer.monday.com/docs/items-queries
 """
@@ -188,6 +188,7 @@ class WorkSpace():
 		
 		# The are no boards currently in the workspace. Things won't work out here.
 		if not self.boards:
+			print("Please create at least one board, can't locate an empty workspace.")
 			return
 		
 		# Just get the workspace id via one of the workspace boards.
@@ -568,7 +569,7 @@ class Item():
 		
 		# The columns values of the item {column id: item's value}.
 		self.columns_values = {}
-
+		
 		# The item already exists in monday.
 		if item_id:
 
@@ -679,9 +680,9 @@ class Item():
 		# Execute.
 		self.group.board.work_space.post_request(query = query)
 
-
+		
+# Usage Explanation.	
 """
-
 	Usage:
 	
 	# ----- Boards columns groups and items creation -----
@@ -727,27 +728,28 @@ class Item():
 	input_board = InputBoard(ws=work_space, name="Input", execution_dict={'Group1': group_1_handle_new_item, 'Group2': group_2_handle_new_item})
 	
 	# Now, when the user adds an item to group1 in monday, input_board automatically calls to group_1_handle_new_item(item_name=new_item1) as a thread.
-
+	pass
 """
+
+# --- Methods ---
 
 
 def new_course(item_name):
-	"""
-		The function is being called when a new course was added as an input.
-	"""
-	
-	courses_board.add_group(Group(board=courses_board, title=item_name))
-	courses_board.groups[item_name].add_item(Item(group=courses_board.groups[item_name], name="This is the subject of the 1st mail", columns_values=[("From", "Moshe"), ("Date", "2022-05-03")]))
-	courses_board.groups[item_name].add_item(Item(group=courses_board.groups[item_name], name="This is the subject of the 2st mail", columns_values=[("From", "Shalom"), ("Date", "2022-05-04")]))
-	courses_board.groups[item_name].add_item(Item(group=courses_board.groups[item_name], name="This is the subject of the 3st mail", columns_values=[("From", "Yisaschar"), ("Date", "2022-05-07")]))
+		"""
+			The function is being called when a new course was added as an input.
+		"""
+		
+		courses_board.add_group(Group(board=courses_board, title=item_name))
+		courses_board.groups[item_name].add_item(Item(group=courses_board.groups[item_name], name="This is the subject of the 1st mail", columns_values=[("From", "Moshe"), ("Date", "2022-05-03")]))
+		courses_board.groups[item_name].add_item(Item(group=courses_board.groups[item_name], name="This is the subject of the 2st mail", columns_values=[("From", "Shalom"), ("Date", "2022-05-04")]))
+		courses_board.groups[item_name].add_item(Item(group=courses_board.groups[item_name], name="This is the subject of the 3st mail", columns_values=[("From", "Yisaschar"), ("Date", "2022-05-07")]))
 
-	# Add the attached files, zoom links and contents of the mails.
-	for i in range(3):
-	
-		courses_board.groups[item_name].items["This is the subject of the " + str(i + 1) + "st mail"].add_link(column_title="Zoom link", link="https://zoom.com/my_meeting" + str(i + 1), description="")
-		courses_board.groups[item_name].items["This is the subject of the " + str(i + 1) + "st mail"].upload_files(column_title="Attached Files", files_paths=['C:\python\MondayHackathon\hello world.txt', 'C:\python\MondayHackathon\Just another file.txt'])
-		courses_board.groups[item_name].items["This is the subject of the " + str(i + 1) + "st mail"].add_update("This is the content of the" + str(i + 1) + " mail.\n"*10)
-
+		# Add the attached files, zoom links and contents of the mails.
+		for i in range(3):
+		
+			courses_board.groups[item_name].items["This is the subject of the " + str(i + 1) + "st mail"].add_link(column_title="Zoom link", link="https://zoom.com/my_meeting" + str(i + 1), description="")
+			courses_board.groups[item_name].items["This is the subject of the " + str(i + 1) + "st mail"].upload_files(column_title="Attached Files", files_paths=['C:\python\MondayHackathon\hello world.txt', 'C:\python\MondayHackathon\Just another file.txt'])
+			courses_board.groups[item_name].items["This is the subject of the " + str(i + 1) + "st mail"].add_update("This is the content of the" + str(i + 1) + " mail.\n"*10)
 
 def new_lecturer(item_name):
 	"""
@@ -766,7 +768,10 @@ def new_lecturer(item_name):
 		lecturers_board.groups[item_name].items["This is the subject of the " + str(i + 1) + "st mail"].upload_files(column_title="Attached Files", files_paths=['C:\python\MondayHackathon\hello world.txt', 'C:\python\MondayHackathon\Just another file.txt'])
 		lecturers_board.groups[item_name].items["This is the subject of the " + str(i + 1) + "st mail"].add_update("This is the content of the" + str(i + 1) + " mail.\n"*10)
 
-		
+
+# --- Code ---
+
+
 # Create the workspace.
 work_space = WorkSpace(name="test", token="eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjE1ODI2MDM3MiwidWlkIjoyOTk1NzM5MSwiaWFkIjoiMjAyMi0wNC0yOVQyMTo0NzozNi4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6MTE4NzU5MjIsInJnbiI6InVzZTEifQ.R7UplEfmGyfk1uPEr1A-UFNlcdCZ8VjfrGKl63WQYYo")
 
@@ -778,7 +783,7 @@ work_space = WorkSpace(name="test", token="eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjE1ODI2
 input_board = InputBoard(ws=work_space, name="Input", execution_dict={'Courses': new_course, 'Lecturers': new_lecturer})
 
 # Create input groups.
-for input_type in ["Courses", "Lecturers", "Special Contacts"]:
+for input_type in ["Courses"]:
 
 	# Create a group for the current input type.
 	input_board.add_group(Group(board=input_board, title=input_type))
@@ -797,17 +802,5 @@ courses_board.add_column(Column(board=courses_board, title="Zoom link", descript
 courses_board.add_column(Column(board=courses_board, title="Attached Files", description="All the files attached to this mail", column_type="file"))
 
 
-# --- Lecturers Board ---
-
-
-# Create a new board for the courses.
-lecturers_board = Board(ws=work_space, name="Lecturers")
-
-# Create columns for the courses board.
-lecturers_board.add_column(Column(board=lecturers_board, title="Date", description="When the email was received", column_type="date"))
-lecturers_board.add_column(Column(board=lecturers_board, title="Zoom link", description="Links in the mail message", column_type="link"))
-lecturers_board.add_column(Column(board=lecturers_board, title="Attached Files", description="All the files attached to this mail", column_type="file"))
-
 # Start listening to the input board.
 input_board.start()
-
