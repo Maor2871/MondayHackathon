@@ -1,4 +1,47 @@
-# Monday-API-Interface
+# 🏆 Hackathon Winning Project - SmartInbox for Students 🏆
+
+Developed as part of a university hackathon, this tool helps students manage their academic emails more effectively — by integrating their inbox directly into the Monday.com platform.
+
+![Winning Screenshot](Overview/WinningCheck.jpg)
+
+## 🔍 What It Does
+
+Our system analyzes the student's email inbox and extracts relevant academic information, then displays it inside Monday in a clean, organized, and user-friendly interface.
+
+### Key Features
+
+- 🧠 **Smart Inbox Sorting** – Uses machine learning (scikit-learn) to rank emails by academic relevance.
+- 📅 **Course Detection** – Retrieves course names via the Monday API and automatically filters inbox messages related to each course.
+- 🔗 **Zoom Link Extraction** – Highlights meeting links and other critical resources in each message.
+- ⚡ **Fast & Scalable** – Uses multi-threading to fetch and display large volumes of information quickly.
+- 🔄 **Seamless Integration** – Automatically connects to the email account already linked with the user’s Monday account.
+
+## 🧪 Tech Stack
+
+- **Python** – core backend and logic
+- **scikit-learn** – for ML-based email relevance ranking
+- **Monday.com API** – for reading course lists and presenting data in Monday
+- **Client–Server Architecture** – supports multiple users with backend-side processing
+- **Multi-threading** – enables parallel data extraction and presentation
+
+## 🏅 Why It Stood Out
+
+- 🔗 **Deep Monday API integration** – We implemented advanced features like user input handling and bulk updates, where many teams struggled with basic connectivity.
+- 🧑‍🎓 **User-Centered Design** – The tool directly solves real student pain points (e.g., finding Zoom links or important announcements).
+- ⚙️ **Technical Robustness** – Scalable, fast, and clean — ready for real-world usage.
+
+## 🎥 Live Demo
+
+Check out a full walkthrough of the tool in action:
+
+![SmartInbox Demo](Overview/Overview.gif)
+
+
+## Monday-API-Interface
+
+Here is a user guide only for the wrapper for the Monday API.
+The wrapper is located inside the "interface" folder.
+
 Author: © Maor Raviach.
 mail address: maor29468@gmail.com. 
 
